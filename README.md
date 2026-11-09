@@ -1,6 +1,6 @@
 # NexaClip
 
-Bộ khung ứng dụng Flutter quản lý clipboard, ưu tiên Windows. Hiện tại chỉ có màn hình khởi đầu; chưa theo dõi hay lưu clipboard.
+Ứng dụng Flutter quản lý clipboard cho Windows. Phiên bản đang phát triển có thể lưu lịch sử văn bản cục bộ khi người dùng bật theo dõi, và dừng theo dõi. Các chức năng khác đang được phát triển.
 
 ## Thiết lập trên Windows
 
@@ -16,4 +16,19 @@ flutter test
 flutter run -d windows
 ```
 
-Project được khởi tạo cho Windows bằng Flutter 3.47.9 stable. Lịch sử clipboard và lưu trữ cục bộ sẽ được thực hiện trong các bước tiếp theo.
+Project được khởi tạo cho Windows bằng Flutter 3.47.9 stable.
+
+Kiểm thử tích hợp Windows sử dụng clipboard hệ thống thật và sẽ thay nội dung hiện tại bằng dữ liệu thử. Chỉ chạy khi có thể mất nội dung clipboard hiện tại. Không chạy đồng thời với các ứng dụng hoặc kiểm thử khác đang sử dụng clipboard. Cần Python trên Windows; thay đường dẫn sau bằng đường dẫn tới `python.exe`:
+
+```powershell
+flutter test integration_test/clipboard_windows_test.dart -d windows --dart-define=TEST_PYTHON=C:\path\to\python.exe
+```
+
+Test này dùng cơ sở dữ liệu tạm và chỉ lưu các chuỗi thử được chỉ định. Test không bảo đảm nhận được mọi thông báo clipboard; việc không thấy một mục riêng tư trong cơ sở dữ liệu không chứng minh thông báo của mục đó đã được xử lý.
+
+## Quyền riêng tư và giới hạn
+
+- Lịch sử được lưu cục bộ trong SQLite **không mã hóa** và có thể chứa mật khẩu hoặc dữ liệu nhạy cảm. Theo dõi mặc định tắt khi mở ứng dụng.
+- Khi clipboard bị ứng dụng khác giữ hoặc thay đổi quá nhanh, NexaClip có thể bỏ lỡ một số bản sao. Không có cơ chế nào bảo đảm nhận diện mọi dữ liệu nhạy cảm.
+- Khi đóng ứng dụng, các bản ghi đang chờ có thể chưa được lưu. Chức năng đóng an toàn đang được hoàn thiện.
+- Lịch sử văn bản hiện giữ tối đa 500 mục mới nhất.

@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.14)
+project(nexaclip_native_tests LANGUAGES CXX)
+add_executable(clipboard_listener_test clipboard_listener_test.cpp)
+target_compile_features(clipboard_listener_test PRIVATE cxx_std_17)
+enable_testing()
+add_test(NAME clipboard_listener_test COMMAND clipboard_listener_test)
