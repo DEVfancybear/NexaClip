@@ -228,6 +228,86 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('clear confirmation does not overlap pending exit',
+      (tester) async {
+    sqfliteFfiInit();
+    late Directory dir;
+    await tester.runAsync(() async =>
+        dir = await Directory.systemTemp.createTemp('nexaclip_dialog_exit_'));
+    const channel = MethodChannel('nexaclip/clipboard');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    await tester.runAsync(() async {
+      final db = await databaseFactoryFfi
+          .openDatabase('${dir.path}${Platform.pathSeparator}history.db');
+      final store = TextHistoryStore(db);
+      await store.initialize();
+      await store.add('synthetic retained', DateTime.utc(2026));
+      await db.close();
+    });
+    final stopGate = Completer<void>();
+    var stops = 0;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'stop') {
+        stops++;
+        await stopGate.future;
+      }
+      return null;
+    });
+    Future<void> waitFor(bool Function() done) async {
+      await tester.runAsync(() async {
+        for (var i = 0; i < 100 && !done(); i++) {
+          await tester.pump();
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      });
+      expect(done(), isTrue);
+    }
+
+    try {
+      await tester.pumpWidget(MaterialApp(
+          home: ClipboardHomePage(supportDirectory: () async => dir)));
+      await waitFor(() =>
+          tester
+              .widget<FilledButton>(find.byType(FilledButton).first)
+              .onPressed !=
+          null);
+      await tester.tap(find.text('Bắt đầu theo dõi'));
+      await waitFor(() => find.text('Dừng theo dõi').evaluate().isNotEmpty);
+      await tester.tap(find.text('Xóa toàn bộ lịch sử'));
+      await tester.pumpAndSettle();
+      AppExitResponse? result;
+      tester.binding.handleRequestAppExit().then((value) => result = value);
+      await waitFor(() => stops == 1);
+      await tester.tap(find.text('Xóa'));
+      await tester.pumpAndSettle();
+      expect(stops, 1);
+      expect(result, isNull);
+      stopGate.complete();
+      await waitFor(() => result != null);
+      expect(result, AppExitResponse.exit);
+      expect(stops, 1);
+      await tester.runAsync(() async {
+        final db = await databaseFactoryFfi.openDatabase(
+          '${dir.path}${Platform.pathSeparator}history.db',
+          options: OpenDatabaseOptions(singleInstance: false),
+        );
+        final store = TextHistoryStore(db);
+        expect((await store.list()).map((entry) => entry.text),
+            contains('synthetic retained'));
+        await db.close();
+      });
+    } finally {
+      if (!stopGate.isCompleted) stopGate.complete();
+      await tester.pumpWidget(const SizedBox());
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        await dir.delete(recursive: true);
+      });
+      messenger.setMockMethodCallHandler(channel, null);
+    }
+  });
+
   testWidgets('exit retries a failed listener stop', (tester) async {
     sqfliteFfiInit();
     late Directory dir;

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -126,6 +127,7 @@ class _ClipboardHomePageState extends State<ClipboardHomePage> {
   }
 
   Future<void> _toggle() async {
+    if (_busy) return;
     final session = _session!;
     setState(() {
       _busy = true;
@@ -144,7 +146,29 @@ class _ClipboardHomePageState extends State<ClipboardHomePage> {
     }
   }
 
+  Future<void> _copyText(String text) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    ScaffoldMessenger.of(context).clearSnackBars();
+    try {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Đã sao chép vào clipboard.')),
+        );
+      }
+    } catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _clearHistory() async {
+    if (_busy) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -161,7 +185,7 @@ class _ClipboardHomePageState extends State<ClipboardHomePage> {
         ],
       ),
     );
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true || !mounted || _busy) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -249,6 +273,13 @@ class _ClipboardHomePageState extends State<ClipboardHomePage> {
                   : ListView.builder(
                       itemCount: visibleEntries.length,
                       itemBuilder: (context, index) => ListTile(
+                        trailing: IconButton(
+                          tooltip: 'Sao chép',
+                          onPressed: _busy
+                              ? null
+                              : () => _copyText(visibleEntries[index].text),
+                          icon: const Icon(Icons.copy),
+                        ),
                         title: Text(visibleEntries[index].text,
                             maxLines: _query.isEmpty ? 3 : null,
                             overflow:
