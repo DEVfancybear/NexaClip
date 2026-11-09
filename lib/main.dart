@@ -143,6 +143,41 @@ class _ClipboardHomePageState extends State<ClipboardHomePage> {
     }
   }
 
+  Future<void> _clearHistory() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Xóa lịch sử?'),
+        content: const Text(
+            'Thao tác này xóa toàn bộ lịch sử và dừng theo dõi clipboard. Dữ liệu có thể vẫn khôi phục được từ tệp hoặc bản sao lưu; đây không phải xóa an toàn.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Hủy')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Xóa')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _session!.stop();
+      await _store!.clear();
+      _refreshGeneration++;
+      if (mounted) setState(() => _entries = []);
+      await _refresh();
+    } catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   void dispose() {
     _lifecycleListener.dispose();
@@ -181,6 +216,11 @@ class _ClipboardHomePageState extends State<ClipboardHomePage> {
           FilledButton(
             onPressed: _busy || _session == null ? null : _toggle,
             child: Text(active ? 'Dừng theo dõi' : 'Bắt đầu theo dõi'),
+          ),
+          TextButton.icon(
+            onPressed: _busy || _session == null ? null : _clearHistory,
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Xóa toàn bộ lịch sử'),
           ),
           if (_error != null)
             Text(_error!,

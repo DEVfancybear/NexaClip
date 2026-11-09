@@ -32,6 +32,10 @@ class TextHistoryStore {
     });
   }
 
+  Future<void> clear() async {
+    await database.delete('text_history');
+  }
+
   Future<List<TextHistoryEntry>> list() async {
     final rows = await database.query(
       'text_history',

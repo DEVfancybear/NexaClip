@@ -1,6 +1,6 @@
 # NexaClip
 
-Ứng dụng Flutter quản lý clipboard cho Windows. Phiên bản đang phát triển có thể lưu lịch sử văn bản cục bộ khi người dùng bật theo dõi, và dừng theo dõi. Các chức năng khác đang được phát triển.
+Ứng dụng Flutter quản lý clipboard cho Windows. Phiên bản đang phát triển có thể lưu lịch sử văn bản cục bộ khi người dùng bật theo dõi, dừng theo dõi và xóa lịch sử. Các chức năng khác đang được phát triển.
 
 ## Thiết lập trên Windows
 
@@ -29,6 +29,7 @@ Test này dùng cơ sở dữ liệu tạm và chỉ lưu các chuỗi thử đ�
 ## Quyền riêng tư và giới hạn
 
 - Lịch sử được lưu cục bộ trong SQLite **không mã hóa** và có thể chứa mật khẩu hoặc dữ liệu nhạy cảm. Theo dõi mặc định tắt khi mở ứng dụng.
+- Xóa lịch sử là xóa logic, không đảm bảo xóa an toàn khỏi tệp, bản sao lưu hoặc thiết bị lưu trữ.
 - Khi clipboard bị ứng dụng khác giữ hoặc thay đổi quá nhanh, NexaClip có thể bỏ lỡ một số bản sao. Không có cơ chế nào bảo đảm nhận diện mọi dữ liệu nhạy cảm.
 - Khi đóng ứng dụng, các bản ghi đang chờ có thể chưa được lưu. Chức năng đóng an toàn đang được hoàn thiện.
 - Lịch sử văn bản hiện giữ tối đa 500 mục mới nhất.

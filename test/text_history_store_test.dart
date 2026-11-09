@@ -59,6 +59,30 @@ void main() {
     }
   });
 
+  test('cleared history stays empty after reopening the database', () async {
+    final directory = await Directory.systemTemp.createTemp('nexaclip_clear_');
+    final path = '${directory.path}${Platform.pathSeparator}history.db';
+    try {
+      var diskDatabase = await databaseFactoryFfi.openDatabase(path);
+      var diskStore = TextHistoryStore(diskDatabase);
+      await diskStore.initialize();
+      await diskStore.add('private text', DateTime.utc(2026));
+      await diskStore.clear();
+      await diskDatabase.close();
+
+      diskDatabase = await databaseFactoryFfi.openDatabase(path);
+      try {
+        diskStore = TextHistoryStore(diskDatabase);
+        await diskStore.initialize();
+        expect(await diskStore.list(), isEmpty);
+      } finally {
+        await diskDatabase.close();
+      }
+    } finally {
+      await directory.delete(recursive: true);
+    }
+  });
+
   test('retains only the newest 500 entries', () async {
     final time = DateTime.utc(2026);
     for (var i = 0; i < 501; i++) {
@@ -68,6 +92,15 @@ void main() {
     expect(entries, hasLength(500));
     expect(entries.first.text, 'entry 500');
     expect(entries.last.text, 'entry 1');
+  });
+
+  test('clear removes all saved entries and permits new entries', () async {
+    await store.add('first', DateTime.utc(2026));
+    await store.add('second', DateTime.utc(2026));
+    await store.clear();
+    expect(await store.list(), isEmpty);
+    await store.add('new', DateTime.utc(2026));
+    expect((await store.list()).single.text, 'new');
   });
 
   test('initializing again preserves entries', () async {
