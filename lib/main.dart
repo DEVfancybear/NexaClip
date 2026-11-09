@@ -40,6 +40,7 @@ class _ClipboardHomePageState extends State<ClipboardHomePage> {
   TextHistoryStore? _store;
   HistorySession? _session;
   List<TextHistoryEntry> _entries = [];
+  String _query = '';
   String? _error;
   bool _busy = true;
   int _refreshGeneration = 0;
@@ -203,6 +204,10 @@ class _ClipboardHomePageState extends State<ClipboardHomePage> {
   @override
   Widget build(BuildContext context) {
     final active = _session?.isActive ?? false;
+    final query = _query.toLowerCase();
+    final visibleEntries = _entries
+        .where((entry) => entry.text.toLowerCase().contains(query))
+        .toList();
     return Scaffold(
       appBar: AppBar(title: const Text('NexaClip')),
       body: Padding(
@@ -226,16 +231,32 @@ class _ClipboardHomePageState extends State<ClipboardHomePage> {
             Text(_error!,
                 style: TextStyle(color: Theme.of(context).colorScheme.error)),
           const SizedBox(height: 16),
+          TextField(
+            decoration: const InputDecoration(
+              labelText: 'Tìm trong lịch sử',
+              prefixIcon: Icon(Icons.search),
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (value) => setState(() => _query = value),
+          ),
+          const SizedBox(height: 12),
           Expanded(
-              child: _entries.isEmpty
-                  ? const Center(child: Text('Chưa có lịch sử văn bản.'))
+              child: visibleEntries.isEmpty
+                  ? Center(
+                      child: Text(_query.isEmpty
+                          ? 'Chưa có lịch sử văn bản.'
+                          : 'Không tìm thấy kết quả.'))
                   : ListView.builder(
-                      itemCount: _entries.length,
+                      itemCount: visibleEntries.length,
                       itemBuilder: (context, index) => ListTile(
-                        title: Text(_entries[index].text,
-                            maxLines: 3, overflow: TextOverflow.ellipsis),
-                        subtitle:
-                            Text(_entries[index].copiedAt.toLocal().toString()),
+                        title: Text(visibleEntries[index].text,
+                            maxLines: _query.isEmpty ? 3 : null,
+                            overflow:
+                                _query.isEmpty ? TextOverflow.ellipsis : null),
+                        subtitle: Text(visibleEntries[index]
+                            .copiedAt
+                            .toLocal()
+                            .toString()),
                       ),
                     )),
         ]),
