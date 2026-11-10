@@ -167,6 +167,42 @@ class _ClipboardHomePageState extends State<ClipboardHomePage> {
     }
   }
 
+  Future<void> _togglePin(TextHistoryEntry entry) async {
+    if (_busy) return;
+    if (entry.pinned) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Bỏ ghim?'),
+          content: const Text(
+              'Mục cũ có thể bị xóa ngay nếu vượt giới hạn 500 mục không ghim.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Hủy')),
+            FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Bỏ ghim')),
+          ],
+        ),
+      );
+      if (!mounted || _busy || confirmed != true) return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _store!.setPinned(entry.id, !entry.pinned);
+      await _refresh();
+    } catch (error) {
+      await _refresh();
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _clearHistory() async {
     if (_busy) return;
     final confirmed = await showDialog<bool>(
@@ -273,13 +309,27 @@ class _ClipboardHomePageState extends State<ClipboardHomePage> {
                   : ListView.builder(
                       itemCount: visibleEntries.length,
                       itemBuilder: (context, index) => ListTile(
-                        trailing: IconButton(
-                          tooltip: 'Sao chép',
-                          onPressed: _busy
-                              ? null
-                              : () => _copyText(visibleEntries[index].text),
-                          icon: const Icon(Icons.copy),
-                        ),
+                        trailing:
+                            Row(mainAxisSize: MainAxisSize.min, children: [
+                          IconButton(
+                            tooltip: visibleEntries[index].pinned
+                                ? 'Bỏ ghim'
+                                : 'Ghim',
+                            onPressed: _busy
+                                ? null
+                                : () => _togglePin(visibleEntries[index]),
+                            icon: Icon(visibleEntries[index].pinned
+                                ? Icons.push_pin
+                                : Icons.push_pin_outlined),
+                          ),
+                          IconButton(
+                            tooltip: 'Sao chép',
+                            onPressed: _busy
+                                ? null
+                                : () => _copyText(visibleEntries[index].text),
+                            icon: const Icon(Icons.copy),
+                          ),
+                        ]),
                         title: Text(visibleEntries[index].text,
                             maxLines: _query.isEmpty ? 3 : null,
                             overflow:

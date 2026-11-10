@@ -33,4 +33,4 @@ Test này dùng cơ sở dữ liệu tạm và chỉ lưu các chuỗi thử đ�
 - Sao chép lại thay nội dung clipboard hiện tại. Khi đang theo dõi, thay đổi này có thể được lưu thành một mục lịch sử mới trùng nội dung.
 - Khi clipboard bị ứng dụng khác giữ hoặc thay đổi quá nhanh, NexaClip có thể bỏ lỡ một số bản sao. Không có cơ chế nào bảo đảm nhận diện mọi dữ liệu nhạy cảm.
 - Khi đóng ứng dụng, các bản ghi đang chờ có thể chưa được lưu. Chức năng đóng an toàn đang được hoàn thiện.
-- Lịch sử văn bản hiện giữ tối đa 500 mục mới nhất.
+- Lịch sử giữ tối đa 500 mục không ghim mới nhất; mục đã ghim không bị loại bởi giới hạn này. Khi bỏ ghim, mục cũ có thể bị loại ngay. Xóa toàn bộ cũng xóa mục đã ghim.

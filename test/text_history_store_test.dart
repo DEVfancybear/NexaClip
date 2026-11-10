@@ -44,6 +44,7 @@ void main() {
       var diskStore = TextHistoryStore(diskDatabase);
       await diskStore.initialize();
       await diskStore.add('persisted', DateTime.utc(2026));
+      await diskStore.setPinned((await diskStore.list()).single.id, true);
       await diskDatabase.close();
 
       diskDatabase = await databaseFactoryFfi.openDatabase(path);
@@ -51,6 +52,7 @@ void main() {
         diskStore = TextHistoryStore(diskDatabase);
         await diskStore.initialize();
         expect((await diskStore.list()).single.text, 'persisted');
+        expect((await diskStore.list()).single.pinned, isTrue);
       } finally {
         await diskDatabase.close();
       }
@@ -101,6 +103,51 @@ void main() {
     expect(await store.list(), isEmpty);
     await store.add('new', DateTime.utc(2026));
     expect((await store.list()).single.text, 'new');
+  });
+
+  test('migrates old schema without losing entries', () async {
+    await database.execute('DROP TABLE text_history');
+    await database.execute(
+        'CREATE TABLE text_history (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, copied_at INTEGER NOT NULL)');
+    await database.insert('text_history', {'text': 'old', 'copied_at': 0});
+    await store.initialize();
+    await store.initialize();
+    expect((await store.list()).single.text, 'old');
+    expect((await store.list()).single.pinned, isFalse);
+  });
+
+  test('pins survive retention, unpin re-applies limit, clear removes all',
+      () async {
+    final time = DateTime.utc(2026);
+    await store.add('protected', time);
+    final id = (await store.list()).single.id;
+    await store.setPinned(id, true);
+    for (var i = 0; i < 501; i++) {
+      await store.add('item $i', time.add(Duration(seconds: i + 1)));
+    }
+    var entries = await store.list();
+    expect(entries, hasLength(501));
+    expect(entries.first.text, 'protected');
+    expect(entries.first.pinned, isTrue);
+    expect(entries.any((entry) => entry.text == 'item 0'), isFalse);
+    await store.setPinned(id, false);
+    entries = await store.list();
+    expect(entries, hasLength(500));
+    expect(entries.any((entry) => entry.id == id), isFalse);
+    await store.setPinned(entries.first.id, true);
+    await store.clear();
+    expect(await store.list(), isEmpty);
+  });
+
+  test('pinning an entry removed by retention reports an error', () async {
+    final time = DateTime.utc(2026);
+    await store.add('expired', time);
+    final id = (await store.list()).single.id;
+    for (var i = 0; i < 500; i++) {
+      await store.add('new $i', time.add(Duration(seconds: i + 1)));
+    }
+    await expectLater(store.setPinned(id, true), throwsStateError);
+    expect((await store.list()).any((entry) => entry.id == id), isFalse);
   });
 
   test('initializing again preserves entries', () async {
