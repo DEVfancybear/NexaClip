@@ -57,6 +57,10 @@ class TextHistoryStore {
     });
   }
 
+  Future<void> delete(int id) async {
+    await database.delete('text_history', where: 'id = ?', whereArgs: [id]);
+  }
+
   Future<void> clear() async {
     await database.delete('text_history');
   }

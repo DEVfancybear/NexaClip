@@ -203,6 +203,45 @@ class _ClipboardHomePageState extends State<ClipboardHomePage> {
     }
   }
 
+  Future<void> _deleteEntry(TextHistoryEntry entry) async {
+    if (_busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Xóa mục này?'),
+        content: Text(entry.pinned
+            ? 'Mục này đã được ghim. Dữ liệu có thể vẫn khôi phục được từ tệp hoặc bản sao lưu.'
+            : 'Dữ liệu có thể vẫn khôi phục được từ tệp hoặc bản sao lưu.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Hủy')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Xóa')),
+        ],
+      ),
+    );
+    if (!mounted || _busy || confirmed != true) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _store!.delete(entry.id);
+      _refreshGeneration++;
+      if (mounted) {
+        setState(
+            () => _entries = _entries.where((e) => e.id != entry.id).toList());
+      }
+      await _refresh();
+    } catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _clearHistory() async {
     if (_busy) return;
     final confirmed = await showDialog<bool>(
@@ -321,6 +360,13 @@ class _ClipboardHomePageState extends State<ClipboardHomePage> {
                             icon: Icon(visibleEntries[index].pinned
                                 ? Icons.push_pin
                                 : Icons.push_pin_outlined),
+                          ),
+                          IconButton(
+                            tooltip: 'Xóa mục',
+                            onPressed: _busy
+                                ? null
+                                : () => _deleteEntry(visibleEntries[index]),
+                            icon: const Icon(Icons.delete_outline),
                           ),
                           IconButton(
                             tooltip: 'Sao chép',
