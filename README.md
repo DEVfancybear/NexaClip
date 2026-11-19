@@ -30,7 +30,7 @@ Các integration test `copy_windows_test.dart` và `copy_image_windows_test.dart
 - Hàng đợi ảnh chờ xử lý có giới hạn tổng 20 MiB. Khi đầy, bản sao có cả ảnh và văn bản sẽ chỉ lưu văn bản; bản sao chỉ có ảnh báo lỗi và không được lưu.
 - Khi sao chép ảnh, ứng dụng chuẩn bị dữ liệu trên luồng riêng và từ chối ghi nếu clipboard đã thay đổi trong lúc ảnh được tải hoặc mã hóa. Chỉ một thao tác sao chép ảnh có thể chuẩn bị tại một thời điểm. Khi đóng, ứng dụng có thể phải chờ bộ mã hóa hoàn tất; không có bảo đảm giới hạn thời gian chờ.
 - Xóa lịch sử là xóa logic, không đảm bảo xóa an toàn khỏi tệp, bản sao lưu hoặc thiết bị lưu trữ.
-- Sao chép lại thay nội dung clipboard hiện tại. Khi đang theo dõi, thay đổi này có thể được lưu thành một mục lịch sử mới trùng nội dung.
+- Sao chép lại thay nội dung clipboard hiện tại. Khi đang theo dõi, văn bản giống hệt hoặc ảnh tĩnh có cùng pixel được cập nhật thời gian ở mục hiện có và giữ trạng thái ghim. Ảnh động chỉ được nhận là trùng khi dữ liệu giống hệt; các mục trùng đã tồn tại không tự xóa.
 - Khi clipboard bị ứng dụng khác giữ hoặc thay đổi quá nhanh, NexaClip có thể bỏ lỡ một số bản sao. Không có cơ chế nào bảo đảm nhận diện mọi dữ liệu nhạy cảm.
 - Khi nhận yêu cầu đóng thông thường, ứng dụng cố dừng theo dõi, chờ các bản ghi đang xử lý và đóng cơ sở dữ liệu; nếu thao tác thất bại, yêu cầu đóng bị hủy để có thể thử lại. Đường đóng khi native đang xử lý ảnh vẫn chưa được kiểm chứng đầu-cuối. Không có bảo đảm này khi tiến trình bị buộc kết thúc, mất điện hoặc hệ điều hành không gửi yêu cầu đóng.
 - Lịch sử giữ tối đa 500 mục không ghim mới nhất; mục đã ghim không bị loại bởi giới hạn này. Khi bỏ ghim, mục cũ có thể bị loại ngay. Xóa toàn bộ cũng xóa mục đã ghim.

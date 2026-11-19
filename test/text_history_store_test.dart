@@ -27,6 +27,24 @@ void main() {
     expect(entries.single.copiedAt, time);
   });
 
+  test('repeated text updates the existing entry and keeps its pin', () async {
+    final time = DateTime.utc(2026);
+    await store.add('first', time);
+    final id = (await store.list()).single.id;
+    await store.add('second', time.add(const Duration(seconds: 1)));
+    await store.add('first', time.add(const Duration(seconds: 2)));
+    var entries = await store.list();
+    expect(entries.map((e) => e.text), ['first', 'second']);
+    expect(entries.first.id, id);
+    await store.setPinned(id, true);
+    await store.add('first', time.add(const Duration(seconds: 3)));
+    entries = await store.list();
+    expect(entries, hasLength(2));
+    expect(entries.first.id, id);
+    expect(entries.first.pinned, isTrue);
+    expect(entries.first.copiedAt, time.add(const Duration(seconds: 3)));
+  });
+
   test('returns newest entries first, breaking ties by insertion order',
       () async {
     final time = DateTime.utc(2026);
@@ -35,6 +53,20 @@ void main() {
     await store.add('newest', time.add(const Duration(seconds: 1)));
     expect((await store.list()).map((entry) => entry.text),
         ['newest', 'second', 'first']);
+  });
+
+  test('same millisecond repeat sorts first without changing timestamp or id',
+      () async {
+    final time = DateTime.utc(2026);
+    await store.add('A', time);
+    final id = (await store.list()).single.id;
+    await store.add('B', time);
+    await store.add('A', time);
+    final entries = await store.list();
+    expect(entries.map((e) => e.text), ['A', 'B']);
+    expect(entries.first.id, id);
+    expect(entries.first.copiedAt, time);
+    expect(entries.first.pinned, isFalse);
   });
 
   test('history persists after closing and reopening the database', () async {
@@ -216,14 +248,16 @@ void main() {
     final bytes = Uint8List.fromList([1, 2, 3]);
     await store.addImage(bytes, time);
     final unpinnedId = (await store.list()).single.id;
-    await store.addImage(bytes, time.add(const Duration(seconds: 1)));
+    final pinnedBytes = Uint8List.fromList([4, 5, 6]);
+    await store.addImage(pinnedBytes, time.add(const Duration(seconds: 1)));
     final pinnedId = (await store.list()).first.id;
+    expect(pinnedId, isNot(unpinnedId));
     await store.setPinned(pinnedId, true);
     for (var i = 0; i < TextHistoryStore.maxEntries; i++) {
       await store.add('new $i', time.add(Duration(seconds: i + 2)));
     }
     expect(await store.loadImage(unpinnedId), isNull);
-    expect(await store.loadImage(pinnedId), orderedEquals(bytes));
+    expect(await store.loadImage(pinnedId), orderedEquals(pinnedBytes));
     await store.setPinned(pinnedId, false);
     expect(await store.loadImage(pinnedId), isNull);
     expect(await store.list(), hasLength(TextHistoryStore.maxEntries));
