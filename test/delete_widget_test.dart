@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexaclip/clipboard/text_history_store.dart';
 import 'package:nexaclip/main.dart';
@@ -18,6 +19,28 @@ class HeldDeleteStore extends TextHistoryStore {
     started.complete();
     await release.future;
     await super.delete(id);
+  }
+}
+
+class CaptureDuringDeleteStore extends HeldDeleteStore {
+  CaptureDuringDeleteStore(super.database, super.started, super.release);
+  final staleStarted = Completer<void>();
+  final staleRelease = Completer<void>();
+  final staleReturned = Completer<void>();
+  bool holdNext = false;
+  List<TextHistoryEntry>? staleRows;
+
+  @override
+  Future<List<TextHistoryEntry>> list() async {
+    final rows = await super.list();
+    if (holdNext) {
+      holdNext = false;
+      staleRows = rows;
+      staleStarted.complete();
+      await staleRelease.future;
+      staleReturned.complete();
+    }
+    return rows;
   }
 }
 
@@ -91,11 +114,124 @@ void main() {
         await db.close();
       });
     } finally {
-      await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
         await Future<void>.delayed(const Duration(milliseconds: 300));
         await directory.delete(recursive: true);
       });
+    }
+  });
+
+  testWidgets('capture during delete cannot restore a stale deleted item',
+      (tester) async {
+    sqfliteFfiInit();
+    Directory? directory;
+    CaptureDuringDeleteStore? held;
+    final deleteStarted = Completer<void>();
+    final deleteRelease = Completer<void>();
+    const channel = MethodChannel('nexaclip/clipboard');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    Future<void> waitFor(bool Function() condition) async {
+      await tester.runAsync(() async {
+        for (var i = 0; i < 100 && !condition(); i++) {
+          await tester.pump();
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      });
+      expect(condition(), isTrue);
+    }
+
+    try {
+      await tester.runAsync(() async {
+        directory =
+            await Directory.systemTemp.createTemp('nexaclip_delete_capture_');
+      });
+      messenger.setMockMethodCallHandler(channel, (call) async => null);
+      await tester.runAsync(() async {
+        final db = await databaseFactoryFfi.openDatabase(
+            '${directory!.path}${Platform.pathSeparator}history.db');
+        try {
+          final store = TextHistoryStore(db);
+          await store.initialize();
+          await store.add('synthetic old', DateTime.utc(2026));
+        } finally {
+          await db.close();
+        }
+      });
+      await tester.pumpWidget(MaterialApp(
+          home: ClipboardHomePage(
+        supportDirectory: () async => directory!,
+        storeFactory: (db) =>
+            held = CaptureDuringDeleteStore(db, deleteStarted, deleteRelease),
+      )));
+      await waitFor(() => find.text('synthetic old').evaluate().isNotEmpty);
+      await tester.tap(find.text('Bắt đầu theo dõi'));
+      await waitFor(() => find.text('Dừng theo dõi').evaluate().isNotEmpty);
+      await tester.tap(find.byTooltip('Xóa mục'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Xóa'));
+      await waitFor(() => deleteStarted.isCompleted);
+      final activeStore = held!;
+      activeStore.holdNext = true;
+      messenger.handlePlatformMessage(
+          channel.name,
+          const StandardMethodCodec()
+              .encodeMethodCall(const MethodCall('changed', 'synthetic new')),
+          (_) {});
+      await waitFor(() => activeStore.staleStarted.isCompleted);
+      expect(activeStore.staleRows!.map((e) => e.text),
+          containsAll(['synthetic old', 'synthetic new']));
+      deleteRelease.complete();
+      await waitFor(() =>
+          find.text('synthetic new').evaluate().isNotEmpty &&
+          find.text('synthetic old').evaluate().isEmpty);
+      activeStore.staleRelease.complete();
+      await waitFor(() => activeStore.staleReturned.isCompleted);
+      await tester.pump();
+      expect(find.text('synthetic old'), findsNothing);
+      expect(find.text('synthetic new'), findsOneWidget);
+      await tester.runAsync(() async {
+        final db = await databaseFactoryFfi.openDatabase(
+            '${directory!.path}${Platform.pathSeparator}history.db',
+            options: OpenDatabaseOptions(singleInstance: false));
+        try {
+          expect((await TextHistoryStore(db).list()).map((e) => e.text),
+              ['synthetic new']);
+        } finally {
+          await db.close();
+        }
+      });
+      await tester.tap(find.text('Dừng theo dõi'));
+      await waitFor(() => find.text('Bắt đầu theo dõi').evaluate().isNotEmpty);
+    } finally {
+      if (!deleteRelease.isCompleted) deleteRelease.complete();
+      final pendingStore = held;
+      if (pendingStore != null && !pendingStore.staleRelease.isCompleted) {
+        pendingStore.staleRelease.complete();
+      }
+      try {
+        try {
+          await tester.runAsync(() => tester.pumpWidget(const SizedBox()));
+        } finally {
+          await tester.runAsync(() async {
+            final temp = directory;
+            if (temp == null) return;
+            final deadline = DateTime.now().add(const Duration(seconds: 5));
+            while (true) {
+              try {
+                await temp.delete(recursive: true);
+                break;
+              } on FileSystemException {
+                if (DateTime.now().isAfter(deadline)) rethrow;
+                await Future<void>.delayed(const Duration(milliseconds: 20));
+              }
+            }
+          });
+        }
+      } finally {
+        messenger.setMockMethodCallHandler(channel, null);
+      }
     }
   });
 
@@ -145,8 +281,8 @@ void main() {
       await waitFor(() => find.text('synthetic held').evaluate().isEmpty);
     } finally {
       if (!release.isCompleted) release.complete();
-      await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
         await Future<void>.delayed(const Duration(milliseconds: 300));
         await directory.delete(recursive: true);
       });
@@ -198,8 +334,8 @@ void main() {
       await waitFor(() => find.text('synthetic retry').evaluate().isEmpty);
       expect(find.textContaining('synthetic delete failure'), findsNothing);
     } finally {
-      await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
         await Future<void>.delayed(const Duration(milliseconds: 300));
         await directory.delete(recursive: true);
       });

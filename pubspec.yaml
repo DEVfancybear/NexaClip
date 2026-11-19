@@ -5,10 +5,12 @@ version: 0.1.0+1
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
+  flutter: '>=3.50.0'
 
 dependencies:
   flutter:
     sdk: flutter
+  material_ui: ^1.11.0
   path: ^1.9.1
   path_provider: ^2.1.6
   sqflite_common_ffi: ^2.4.5

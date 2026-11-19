@@ -15,7 +15,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
-  ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  const HRESULT com_result = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  if (FAILED(com_result)) {
+    return EXIT_FAILURE;
+  }
+  struct ComCleanup {
+    ~ComCleanup() { ::CoUninitialize(); }
+  } com_cleanup;
 
   flutter::DartProject project(L"data");
 
@@ -38,6 +44,5 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::DispatchMessage(&msg);
   }
 
-  ::CoUninitialize();
   return EXIT_SUCCESS;
 }

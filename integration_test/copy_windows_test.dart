@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:nexaclip/clipboard/text_history_store.dart';
@@ -45,5 +45,5 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 300));
       await directory.delete(recursive: true);
     }
-  });
+  }, skip: !const bool.fromEnvironment('NEXACLIP_ISOLATED_CLIPBOARD'));
 }

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexaclip/clipboard/text_history_store.dart';
@@ -148,6 +149,84 @@ void main() {
     }
     await expectLater(store.setPinned(id, true), throwsStateError);
     expect((await store.list()).any((entry) => entry.id == id), isFalse);
+  });
+
+  test('migrates pinned schema and persists image after reopening', () async {
+    final directory = await Directory.systemTemp.createTemp('nexaclip_image_');
+    final path = '${directory.path}${Platform.pathSeparator}history.db';
+    final bytes = Uint8List.fromList([137, 80, 78, 71, 13, 10]);
+    try {
+      var db = await databaseFactoryFfi.openDatabase(path);
+      await db.execute(
+          'CREATE TABLE text_history (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, copied_at INTEGER NOT NULL, pinned INTEGER NOT NULL DEFAULT 0)');
+      await db.insert(
+          'text_history', {'text': 'old pinned', 'copied_at': 1, 'pinned': 1});
+      var diskStore = TextHistoryStore(db);
+      await diskStore.initialize();
+      await diskStore.initialize();
+      await diskStore.addImage(bytes, DateTime.utc(2026));
+      await db.close();
+      db = await databaseFactoryFfi.openDatabase(path);
+      try {
+        diskStore = TextHistoryStore(db);
+        await diskStore.initialize();
+        final entries = await diskStore.list();
+        expect(entries, hasLength(2));
+        expect(entries.first.text, 'old pinned');
+        expect(entries.first.pinned, isTrue);
+        expect(entries.first.isImage, isFalse);
+        expect(await diskStore.loadImage(entries.first.id), isNull);
+        expect(entries.last.isImage, isTrue);
+        expect(
+            await diskStore.loadImage(entries.last.id), orderedEquals(bytes));
+      } finally {
+        await db.close();
+      }
+    } finally {
+      await directory.delete(recursive: true);
+    }
+  });
+
+  test('image entries share pin, retention, delete and clear behavior',
+      () async {
+    final bytes = Uint8List.fromList([137, 80, 78, 71]);
+    final time = DateTime.utc(2026);
+    await store.addImage(bytes, time);
+    final image = (await store.list()).single;
+    expect(image.isImage, isTrue);
+    expect(await store.loadImage(image.id), orderedEquals(bytes));
+    expect(image.text, isEmpty);
+    await store.setPinned(image.id, true);
+    for (var i = 0; i < 501; i++) {
+      await store.add('text $i', time.add(Duration(seconds: i + 1)));
+    }
+    expect((await store.list()).first.isImage, isTrue);
+    expect(await store.loadImage(image.id), orderedEquals(bytes));
+    await store.delete(image.id);
+    expect(await store.loadImage(image.id), isNull);
+    expect((await store.list()).any((e) => e.id == image.id), isFalse);
+    await store.addImage(bytes, time.add(const Duration(days: 1)));
+    await store.clear();
+    expect(await store.list(), isEmpty);
+    await expectLater(store.addImage(Uint8List(0), time), throwsArgumentError);
+  });
+
+  test('old unpinned images are trimmed, including after unpinning', () async {
+    final time = DateTime.utc(2026);
+    final bytes = Uint8List.fromList([1, 2, 3]);
+    await store.addImage(bytes, time);
+    final unpinnedId = (await store.list()).single.id;
+    await store.addImage(bytes, time.add(const Duration(seconds: 1)));
+    final pinnedId = (await store.list()).first.id;
+    await store.setPinned(pinnedId, true);
+    for (var i = 0; i < TextHistoryStore.maxEntries; i++) {
+      await store.add('new $i', time.add(Duration(seconds: i + 2)));
+    }
+    expect(await store.loadImage(unpinnedId), isNull);
+    expect(await store.loadImage(pinnedId), orderedEquals(bytes));
+    await store.setPinned(pinnedId, false);
+    expect(await store.loadImage(pinnedId), isNull);
+    expect(await store.list(), hasLength(TextHistoryStore.maxEntries));
   });
 
   test('initializing again preserves entries', () async {

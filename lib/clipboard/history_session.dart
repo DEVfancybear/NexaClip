@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'text_capture.dart';
 import 'text_history_recorder.dart';
 import 'text_history_store.dart';
@@ -47,13 +49,31 @@ class HistorySession {
     required void Function(Object, StackTrace) onError,
     void Function()? onRecorded,
   })  : _source = source,
-        _capture = TextCapture(TextHistoryRecorder(store),
-            onError: onError, onRecorded: onRecorded);
+        _capture = TextCapture(
+            TextHistoryRecorder(store, onImageRejected: () {
+              onError(
+                  StateError(
+                      'Ảnh PNG không hợp lệ, vượt giới hạn hoặc hàng đợi ảnh đã đầy; văn bản đi kèm vẫn có thể được lưu.'),
+                  StackTrace.current);
+            }),
+            onError: onError,
+            onRecorded: onRecorded) {
+    _urgentSubscription = _source.urgentDiagnostics.listen((error) {
+      if (_disposed || !_capture.isActive) return;
+      try {
+        onError(error, StackTrace.current);
+      } catch (_) {
+        // A UI callback must not affect capture or channel replies.
+      }
+    });
+  }
 
   final WindowsClipboardSource _source;
   final TextCapture _capture;
+  late final StreamSubscription<Object> _urgentSubscription;
   bool _active = false;
   bool _disposed = false;
+  Future<void>? _disposeResult;
   Future<void> _pending = Future.value();
 
   bool get isActive => _capture.isActive;
@@ -71,18 +91,27 @@ class HistorySession {
       // A failed stop leaves the native listener registered; retry cleanup
       // before starting another capture subscription.
       if (_active) await _stop();
-      _capture.start(_source.events);
+      _capture.start(_source.snapshots);
+      _source.requireRecordingAcknowledgement = true;
+      // A failed start reply does not prove native registration failed.
+      _active = true;
       try {
         await _source.start();
-        _active = true;
       } catch (listenerError, listenerStack) {
+        Object startError = listenerError;
+        try {
+          await _source.stop();
+          _active = false;
+        } catch (cleanupError) {
+          startError = HistoryStopException(listenerError, cleanupError);
+        }
         try {
           await _capture.stop();
         } catch (writeError, writeStack) {
           Error.throwWithStackTrace(
-              HistoryStartException(listenerError, writeError), writeStack);
+              HistoryStartException(startError, writeError), writeStack);
         }
-        Error.throwWithStackTrace(listenerError, listenerStack);
+        Error.throwWithStackTrace(startError, listenerStack);
       }
     });
   }
@@ -115,9 +144,9 @@ class HistorySession {
   Future<void> stop() => _enqueue(_stop);
 
   Future<void> dispose() {
-    if (_disposed) return _pending;
+    if (_disposeResult case final result?) return result;
     _disposed = true;
-    return _enqueue(() async {
+    final result = _enqueue(() async {
       Object? stopError;
       StackTrace? stopStack;
       try {
@@ -126,6 +155,7 @@ class HistorySession {
         stopError = error;
         stopStack = stack;
       }
+      await _urgentSubscription.cancel();
       try {
         await _source.dispose();
       } catch (error, stack) {
@@ -137,5 +167,7 @@ class HistorySession {
       }
       if (stopError != null) Error.throwWithStackTrace(stopError, stopStack!);
     });
+    _disposeResult = result;
+    return result;
   }
 }

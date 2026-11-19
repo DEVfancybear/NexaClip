@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:nexaclip/main.dart';
 import 'package:nexaclip/clipboard/text_history_store.dart';
@@ -75,7 +75,42 @@ class HeldWriteStore extends TextHistoryStore {
   }
 }
 
+class BlockingExitObserver with WidgetsBindingObserver {
+  final entered = Completer<void>();
+  final release = Completer<void>();
+
+  @override
+  Future<AppExitResponse> didRequestAppExit() async {
+    entered.complete();
+    await release.future;
+    return AppExitResponse.exit;
+  }
+}
+
 void main() {
+  testWidgets('disposed observer safely handles delayed binding exit',
+      (tester) async {
+    final observer = BlockingExitObserver();
+    final directory = Completer<Directory>();
+    tester.binding.addObserver(observer);
+    try {
+      await tester.pumpWidget(MaterialApp(
+          home: ClipboardHomePage(supportDirectory: () => directory.future)));
+      AppExitResponse? response;
+      tester.binding.handleRequestAppExit().then((value) => response = value);
+      await tester.pump();
+      expect(observer.entered.isCompleted, isTrue);
+      await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+      observer.release.complete();
+      await tester.pump();
+      expect(response, AppExitResponse.exit);
+      expect(tester.takeException(), isNull);
+    } finally {
+      if (!observer.release.isCompleted) observer.release.complete();
+      tester.binding.removeObserver(observer);
+    }
+  });
+
   testWidgets('clear confirmation removes persisted history', (tester) async {
     late Directory directory;
     sqfliteFfiInit();
@@ -118,9 +153,9 @@ void main() {
         }
       });
       expect(find.text('saved item'), findsNothing);
-      expect(find.text('Chưa có lịch sử văn bản.'), findsOneWidget);
-      await tester.pumpWidget(const SizedBox());
+      expect(find.text('Chưa có lịch sử clipboard.'), findsOneWidget);
       await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
         await Future<void>.delayed(const Duration(milliseconds: 100));
         final db = await databaseFactoryFfi.openDatabase(
             '${directory.path}${Platform.pathSeparator}history.db');
@@ -208,8 +243,8 @@ void main() {
       expect(find.text('old secret'), findsNothing);
       expect(find.textContaining('refresh failed'), findsOneWidget);
     } finally {
-      await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
         await Future<void>.delayed(const Duration(milliseconds: 100));
         await directory.delete(recursive: true);
       });
@@ -299,8 +334,8 @@ void main() {
       });
     } finally {
       if (!stopGate.isCompleted) stopGate.complete();
-      await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
         await Future<void>.delayed(const Duration(milliseconds: 300));
         await dir.delete(recursive: true);
       });
@@ -357,8 +392,374 @@ void main() {
       expect(calls, ['start', 'stop', 'stop']);
     } finally {
       stops = 1;
-      await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        await dir.delete(recursive: true);
+      });
+      messenger.setMockMethodCallHandler(channel, null);
+    }
+  });
+
+  testWidgets('shows oversized clipboard text warning', (tester) async {
+    sqfliteFfiInit();
+    late Directory dir;
+    await tester.runAsync(() async =>
+        dir = await Directory.systemTemp.createTemp('nexaclip_warning_'));
+    const channel = MethodChannel('nexaclip/clipboard');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async => null);
+    Future<void> waitFor(bool Function() done) async {
+      await tester.runAsync(() async {
+        for (var i = 0; i < 100 && !done(); i++) {
+          await tester.pump();
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      });
+      expect(done(), isTrue);
+    }
+
+    try {
+      await tester.pumpWidget(MaterialApp(
+          home: ClipboardHomePage(supportDirectory: () async => dir)));
+      await waitFor(() =>
+          tester
+              .widget<FilledButton>(find.byType(FilledButton).first)
+              .onPressed !=
+          null);
+      await tester.tap(find.text('Bắt đầu theo dõi'));
+      await waitFor(() => find.text('Dừng theo dõi').evaluate().isNotEmpty);
+      final data = const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('changed', {'textTooLarge': true}));
+      tester.binding.defaultBinaryMessenger
+          .handlePlatformMessage(channel.name, data, (_) {});
+      await waitFor(() => find
+          .textContaining('Văn bản clipboard vượt 1 MiB')
+          .evaluate()
+          .isNotEmpty);
+      await tester.tap(find.text('Dừng theo dõi'));
+      await waitFor(() => find.text('Bắt đầu theo dõi').evaluate().isNotEmpty);
+    } finally {
+      await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        await dir.delete(recursive: true);
+      });
+      messenger.setMockMethodCallHandler(channel, null);
+    }
+  });
+
+  testWidgets(
+      'retains both warnings when an oversized text accompanies a corrupt image',
+      (tester) async {
+    sqfliteFfiInit();
+    late Directory dir;
+    await tester.runAsync(() async =>
+        dir = await Directory.systemTemp.createTemp('nexaclip_warning_'));
+    const channel = MethodChannel('nexaclip/clipboard');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async => null);
+    Future<void> waitFor(bool Function() done) async {
+      await tester.runAsync(() async {
+        for (var i = 0; i < 100 && !done(); i++) {
+          await tester.pump();
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      });
+      expect(done(), isTrue);
+    }
+
+    try {
+      await tester.pumpWidget(MaterialApp(
+          home: ClipboardHomePage(supportDirectory: () async => dir)));
+      await waitFor(() =>
+          tester
+              .widget<FilledButton>(find.byType(FilledButton).first)
+              .onPressed !=
+          null);
+      await tester.tap(find.text('Bắt đầu theo dõi'));
+      await waitFor(() => find.text('Dừng theo dõi').evaluate().isNotEmpty);
+      final data =
+          const StandardMethodCodec().encodeMethodCall(MethodCall('changed', {
+        'textTooLarge': true,
+        'png': Uint8List.fromList([1, 2, 3])
+      }));
+      tester.binding.defaultBinaryMessenger
+          .handlePlatformMessage(channel.name, data, (_) {});
+      await waitFor(() =>
+          find.textContaining('Ảnh PNG không hợp lệ').evaluate().isNotEmpty);
+      expect(
+          find.textContaining('Văn bản clipboard vượt 1 MiB'), findsOneWidget);
+      await tester.tap(find.text('Dừng theo dõi'));
+      await waitFor(() => find.text('Bắt đầu theo dõi').evaluate().isNotEmpty);
+    } finally {
+      if (find.text('Dừng theo dõi').evaluate().isNotEmpty) {
+        await tester.tap(find.text('Dừng theo dõi'));
+        await waitFor(
+            () => find.text('Bắt đầu theo dõi').evaluate().isNotEmpty);
+      }
+      await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        await dir.delete(recursive: true);
+      });
+      messenger.setMockMethodCallHandler(channel, null);
+    }
+  });
+
+  for (final closeBeforeThrow in [false, true]) {
+    testWidgets(
+        'close failure disables actions and exit can retry ($closeBeforeThrow)',
+        (tester) async {
+      sqfliteFfiInit();
+      late Directory dir;
+      await tester.runAsync(() async {
+        dir = await Directory.systemTemp.createTemp('nexaclip_close_failure_');
+        final db = await databaseFactoryFfi
+            .openDatabase('${dir.path}${Platform.pathSeparator}history.db');
+        final store = TextHistoryStore(db);
+        await store.initialize();
+        await store.add('close failure item', DateTime.utc(2026));
+        await db.close();
+      });
+      var attempts = 0;
+      try {
+        await tester.pumpWidget(MaterialApp(
+            home: ClipboardHomePage(
+          supportDirectory: () async => dir,
+          closeDatabase: (db) async {
+            attempts++;
+            if (attempts == 1) {
+              if (closeBeforeThrow) await db.close();
+              throw StateError('synthetic close failure');
+            }
+            await db.close();
+          },
+        )));
+        await tester.runAsync(() async {
+          for (var i = 0;
+              i < 100 && find.text('close failure item').evaluate().isEmpty;
+              i++) {
+            await tester.pump();
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+          }
+        });
+        expect(find.text('close failure item'), findsOneWidget);
+        Future<AppExitResponse?> requestExit() async {
+          AppExitResponse? result;
+          tester.binding.handleRequestAppExit().then((value) => result = value);
+          await tester.runAsync(() async {
+            for (var i = 0; i < 100 && result == null; i++) {
+              await tester.pump();
+              await Future<void>.delayed(const Duration(milliseconds: 20));
+            }
+          });
+          return result;
+        }
+
+        expect(await requestExit(), AppExitResponse.cancel);
+        expect(find.textContaining('synthetic close failure'), findsOneWidget);
+        expect(
+            tester
+                .widget<FilledButton>(find.byType(FilledButton).first)
+                .onPressed,
+            isNull);
+        expect(
+            tester
+                .widget<IconButton>(find.byWidgetPredicate(
+                    (w) => w is IconButton && w.tooltip == 'Xóa mục'))
+                .onPressed,
+            isNull);
+        expect(
+            tester
+                .widget<IconButton>(find.byWidgetPredicate(
+                    (w) => w is IconButton && w.tooltip == 'Sao chép'))
+                .onPressed,
+            isNull);
+        expect(await requestExit(), AppExitResponse.exit);
+        expect(attempts, closeBeforeThrow ? 1 : 2);
+      } finally {
+        await tester.runAsync(() async {
+          await tester.pumpWidget(const SizedBox());
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+          await dir.delete(recursive: true);
+        });
+      }
+    });
+  }
+
+  testWidgets('dispose waits for listener stop before closing', (tester) async {
+    sqfliteFfiInit();
+    late Directory dir;
+    await tester.runAsync(() async =>
+        dir = await Directory.systemTemp.createTemp('nexaclip_exit_stop_'));
+    late Future<AppExitResponse> Function() requestExit;
+    final stopStarted = Completer<void>();
+    final stopGate = Completer<void>();
+    final closeStarted = Completer<void>();
+    const channel = MethodChannel('nexaclip/clipboard');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'stop') {
+        if (!stopStarted.isCompleted) stopStarted.complete();
+        await stopGate.future;
+      }
+      return null;
+    });
+    Future<void> waitFor(bool Function() done) async {
+      await tester.runAsync(() async {
+        for (var i = 0; i < 100 && !done(); i++) {
+          await tester.pump();
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      });
+      expect(done(), isTrue);
+    }
+
+    try {
+      await tester.pumpWidget(MaterialApp(
+          home: ClipboardHomePage(
+        supportDirectory: () async => dir,
+        onExitCallbackReady: (callback) => requestExit = callback,
+        closeDatabase: (db) async {
+          closeStarted.complete();
+          await db.close();
+        },
+      )));
+      await waitFor(() =>
+          tester
+              .widget<FilledButton>(find.byType(FilledButton).first)
+              .onPressed !=
+          null);
+      await tester.tap(find.text('Bắt đầu theo dõi'));
+      await waitFor(() => find.text('Dừng theo dõi').evaluate().isNotEmpty);
+      AppExitResponse? result;
+      requestExit().then((value) => result = value);
+      await waitFor(() => stopStarted.isCompleted);
+      await tester.runAsync(() => tester.pumpWidget(const SizedBox()));
+      expect(closeStarted.isCompleted, isFalse);
+      stopGate.complete();
+      await waitFor(() => result != null);
+      expect(result, AppExitResponse.exit);
+      expect(closeStarted.isCompleted, isTrue);
+    } finally {
+      if (!stopGate.isCompleted) stopGate.complete();
+      await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
+        await dir.delete(recursive: true);
+      });
+      messenger.setMockMethodCallHandler(channel, null);
+    }
+  });
+
+  testWidgets('dispose waits for an in-flight exit close', (tester) async {
+    sqfliteFfiInit();
+    late Directory dir;
+    await tester.runAsync(() async =>
+        dir = await Directory.systemTemp.createTemp('nexaclip_exit_dispose_'));
+    late Future<AppExitResponse> Function() requestExit;
+    final closeStarted = Completer<void>();
+    final closeGate = Completer<void>();
+    var closeCalls = 0;
+    try {
+      await tester.pumpWidget(MaterialApp(
+          home: ClipboardHomePage(
+        supportDirectory: () async => dir,
+        onExitCallbackReady: (callback) => requestExit = callback,
+        closeDatabase: (db) async {
+          closeCalls++;
+          closeStarted.complete();
+          await closeGate.future;
+          await db.close();
+        },
+      )));
+      await tester.runAsync(() async {
+        for (var i = 0; i < 100; i++) {
+          await tester.pump();
+          if (tester
+                  .widget<FilledButton>(find.byType(FilledButton).first)
+                  .onPressed !=
+              null) {
+            break;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      });
+      final exit = requestExit();
+      await tester.runAsync(() => closeStarted.future);
+      await tester.runAsync(() => tester.pumpWidget(const SizedBox()));
+      expect(closeCalls, 1);
+      closeGate.complete();
+      final response = await tester.runAsync(() => exit);
+      expect(response, AppExitResponse.exit);
+      expect(closeCalls, 1);
+    } finally {
+      if (!closeGate.isCompleted) closeGate.complete();
+      await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
+        await dir.delete(recursive: true);
+      });
+    }
+  });
+
+  testWidgets('exit waits for an outstanding history refresh', (tester) async {
+    sqfliteFfiInit();
+    late Directory dir;
+    await tester.runAsync(() async =>
+        dir = await Directory.systemTemp.createTemp('nexaclip_exit_refresh_'));
+    final started = Completer<void>();
+    final release = Completer<void>();
+    final returned = Completer<void>();
+    const channel = MethodChannel('nexaclip/clipboard');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (_) async => null);
+    Future<void> waitFor(bool Function() done) async {
+      await tester.runAsync(() async {
+        for (var i = 0; i < 100 && !done(); i++) {
+          await tester.pump();
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      });
+      expect(done(), isTrue);
+    }
+
+    try {
+      await tester.pumpWidget(MaterialApp(
+          home: ClipboardHomePage(
+        supportDirectory: () async => dir,
+        storeFactory: (db) =>
+            DelayedRefreshStore(db, started, release, returned),
+      )));
+      await waitFor(() =>
+          tester
+              .widget<FilledButton>(find.byType(FilledButton).first)
+              .onPressed !=
+          null);
+      await tester.tap(find.text('Bắt đầu theo dõi'));
+      await waitFor(() => find.text('Dừng theo dõi').evaluate().isNotEmpty);
+      final data = const StandardMethodCodec()
+          .encodeMethodCall(const MethodCall('changed', 'refresh pending'));
+      messenger.handlePlatformMessage(channel.name, data, (_) {});
+      await waitFor(() => started.isCompleted);
+      AppExitResponse? result;
+      tester.binding.handleRequestAppExit().then((value) => result = value);
+      await tester.runAsync(() async {
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      expect(result, isNull);
+      release.complete();
+      await waitFor(() => result != null);
+      expect(returned.isCompleted, isTrue);
+      expect(result, AppExitResponse.exit);
+    } finally {
+      if (!release.isCompleted) release.complete();
+      await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
         await Future<void>.delayed(const Duration(milliseconds: 300));
         await dir.delete(recursive: true);
       });
@@ -371,6 +772,7 @@ void main() {
     late Directory dir;
     await tester.runAsync(() async =>
         dir = await Directory.systemTemp.createTemp('nexaclip_drain_'));
+    Database? appDatabase;
     final started = Completer<void>();
     final release = Completer<void>();
     const channel = MethodChannel('nexaclip/clipboard');
@@ -391,7 +793,10 @@ void main() {
       await tester.pumpWidget(MaterialApp(
           home: ClipboardHomePage(
         supportDirectory: () async => dir,
-        storeFactory: (db) => HeldWriteStore(db, started, release),
+        storeFactory: (db) {
+          appDatabase = db;
+          return HeldWriteStore(db, started, release);
+        },
       )));
       await waitFor(() =>
           tester
@@ -417,6 +822,7 @@ void main() {
       release.complete();
       await waitFor(() => result != null);
       expect(result, AppExitResponse.exit);
+      expect(appDatabase!.isOpen, isFalse);
       await tester.runAsync(() async {
         final db = await databaseFactoryFfi
             .openDatabase('${dir.path}${Platform.pathSeparator}history.db');
@@ -426,8 +832,8 @@ void main() {
       });
     } finally {
       if (!release.isCompleted) release.complete();
-      await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
         await Future<void>.delayed(const Duration(milliseconds: 300));
         await dir.delete(recursive: true);
       });
@@ -488,8 +894,8 @@ void main() {
       expect(find.textContaining('synthetic write failure'), findsOneWidget);
     } finally {
       if (!release.isCompleted) release.complete();
-      await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
         await Future<void>.delayed(const Duration(milliseconds: 300));
         await dir.delete(recursive: true);
       });
@@ -902,13 +1308,13 @@ void main() {
     await tester.pumpWidget(const ClipboardApp());
 
     expect(find.text('NexaClip'), findsOneWidget);
-    expect(find.text('Lịch sử văn bản'), findsOneWidget);
+    expect(find.text('Lịch sử clipboard'), findsOneWidget);
     expect(
       find.text(
-          'Lịch sử văn bản được lưu trên máy mà không mã hóa. Nội dung có thể chứa mật khẩu hoặc thông tin nhạy cảm.'),
+          'Lịch sử văn bản và ảnh được lưu trên máy mà không mã hóa. Nội dung có thể chứa mật khẩu hoặc thông tin nhạy cảm.'),
       findsOneWidget,
     );
     expect(find.text('Bắt đầu theo dõi'), findsOneWidget);
-    expect(find.text('Chưa có lịch sử văn bản.'), findsOneWidget);
+    expect(find.text('Chưa có lịch sử clipboard.'), findsOneWidget);
   });
 }

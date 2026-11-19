@@ -1,7 +1,8 @@
 // Test-only Windows entrypoint for close_pending_write.py.
 import 'dart:io';
+import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -10,9 +11,21 @@ import 'package:nexaclip/main.dart';
 
 const token = 'NexaClip-close-pending-synthetic';
 const directoryPath = String.fromEnvironment('CLOSE_TEST_DIRECTORY');
+const imageMode = bool.fromEnvironment('CLOSE_TEST_IMAGE');
+final syntheticPng = base64Decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==');
 
 class GatedStore extends TextHistoryStore {
   GatedStore(super.database);
+
+  @override
+  Future<void> addImage(Uint8List png, DateTime copiedAt) async {
+    await File('$directoryPath/write_started').writeAsString('ready');
+    while (!await File('$directoryPath/release').exists()) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
+    await super.addImage(png, copiedAt);
+  }
 
   @override
   Future<void> add(String text, DateTime copiedAt) async {
@@ -58,7 +71,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Dừng theo dõi'), findsOneWidget);
     final message = const StandardMethodCodec().encodeMethodCall(
-      const MethodCall('changed', token),
+      MethodCall('changed', imageMode ? {'png': syntheticPng} : token),
     );
     tester.binding.defaultBinaryMessenger.handlePlatformMessage(
       'nexaclip/clipboard',

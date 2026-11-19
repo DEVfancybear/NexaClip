@@ -3,6 +3,7 @@
 Build the fixture with CLOSE_TEST_DIRECTORY set to an empty temporary directory,
 then pass the built executable and that directory as arguments.
 """
+import base64
 import ctypes
 from ctypes import wintypes
 from pathlib import Path
@@ -12,6 +13,7 @@ import sys
 import time
 
 exe, directory = Path(sys.argv[1]), Path(sys.argv[2])
+image_mode = len(sys.argv) > 3 and sys.argv[3] == '--image'
 user = ctypes.WinDLL('user32', use_last_error=True)
 callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 user.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
@@ -71,9 +73,15 @@ try:
     if code != 0:
         raise RuntimeError(f'Fixture exited with code {code}')
     with sqlite3.connect(directory / 'history.db') as db:
-        values = db.execute('SELECT text FROM text_history').fetchall()
-        if values != [('NexaClip-close-pending-synthetic',)]:
-            raise AssertionError('Synthetic write was not committed exactly once')
+        if image_mode:
+            expected = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==')
+            values = db.execute('SELECT image_png FROM text_history').fetchall()
+            if values != [(expected,)]:
+                raise AssertionError('Synthetic image was not committed exactly once')
+        else:
+            values = db.execute('SELECT text FROM text_history').fetchall()
+            if values != [('NexaClip-close-pending-synthetic',)]:
+                raise AssertionError('Synthetic write was not committed exactly once')
     print('PASS: WM_CLOSE waited for the synthetic pending write')
 finally:
     if process.poll() is None:

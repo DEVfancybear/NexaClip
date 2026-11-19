@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexaclip/clipboard/text_history_store.dart';
 import 'package:nexaclip/main.dart';
@@ -57,8 +57,8 @@ void main() {
       await tester.tap(find.text('Bỏ ghim'));
       await waitFor(() => find.byTooltip('Ghim').evaluate().isNotEmpty);
     } finally {
-      await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
         await Future<void>.delayed(const Duration(milliseconds: 300));
         await directory.delete(recursive: true);
       });
@@ -104,8 +104,8 @@ void main() {
       expect(find.text('expired synthetic item'), findsNothing);
       expect(find.byTooltip('Ghim'), findsNothing);
     } finally {
-      await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
         await Future<void>.delayed(const Duration(milliseconds: 300));
         await directory.delete(recursive: true);
       });
